@@ -11,13 +11,12 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(() => {
   loadingInstance = ElLoading.service({
     lock: true,
     text: 'Loading',
     background: 'rgba(255, 255, 255, 0.7)'
   })
-  next()
 })
 
 router.afterEach((to) => {

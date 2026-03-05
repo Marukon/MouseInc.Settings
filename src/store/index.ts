@@ -58,8 +58,15 @@ export default createStore({
       state.breadCrumbList = getBreadCrumbList(route)
     },
     setLocal (state, lang) {
-      localSave('local', lang)
-      state.local = lang
+      let normalizedLang = lang
+      if (normalizedLang === 'zh') normalizedLang = 'zh-CN'
+      if (normalizedLang === 'en') normalizedLang = 'en-US'
+      if (!['zh-CN', 'zh-TW', 'en-US'].includes(normalizedLang)) {
+        normalizedLang = 'zh-CN'
+      }
+
+      localSave('local', normalizedLang)
+      state.local = normalizedLang
     },
     setSettings (state, settings: { cfg: Record<string, unknown>; gestures: Record<string, unknown> }) {
       const compatSettings = handleVersionCompat(settings)

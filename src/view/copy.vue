@@ -23,16 +23,26 @@
     <div class="table-card">
       <div class="table-wrapper">
         <el-table
+          ref="tableRef"
           :data="proxy.Menu"
+          :row-key="getRowKey"
           stripe
           class="modern-table"
           v-loading="!proxy.Menu"
           :row-class-name="getRowClass"
         >
+          <el-table-column width="54" align="center">
+            <template #default>
+              <div class="drag-handle">
+                <el-icon><Rank /></el-icon>
+              </div>
+            </template>
+          </el-table-column>
+
           <el-table-column :label="$t('valid')" width="70" align="center">
             <template #default="{ row, $index }">
               <el-switch
-                v-model="row.Valid"
+                :model-value="row.Valid"
                 size="small"
                 @change="oncheck($index, $event)"
               />
@@ -172,11 +182,12 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, computed } from 'vue'
+import { reactive, computed, ref, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useStore } from 'vuex'
 import { useI18n } from 'vue-i18n'
 import JsonEdit from './components/json.vue'
-import { Plus, Edit, Delete, Operation } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Operation, Rank } from '@element-plus/icons-vue'
+import Sortable from 'sortablejs'
 import { highlightJSON } from '@/libs/util'
 
 interface MenuItem {
@@ -190,8 +201,30 @@ interface ClipboardManager {
   Menu: MenuItem[]
 }
 
+interface SortableEvent {
+  oldIndex?: number
+  newIndex?: number
+  oldDraggableIndex?: number
+  newDraggableIndex?: number
+  item: HTMLElement
+  from: HTMLElement
+  to: HTMLElement
+}
+
 const store = useStore()
 const { t } = useI18n()
+const tableRef = ref<{ $el: HTMLElement } | null>(null)
+let sortable: Sortable | null = null
+const rowKeyMap = new WeakMap<MenuItem, string>()
+let rowKeySeed = 0
+
+const getRowKey = (row: MenuItem) => {
+  if (!rowKeyMap.has(row)) {
+    rowKeySeed += 1
+    rowKeyMap.set(row, `menu-row-${rowKeySeed}`)
+  }
+  return rowKeyMap.get(row) as string
+}
 
 const getRowClass = ({ row }: { row: MenuItem }) => {
   return !row.Name ? 'is-divider-row' : ''
@@ -216,6 +249,16 @@ const proxy = computed<ClipboardManager>(() => {
   }
 })
 
+const updateClipboardManager = (menu: MenuItem[]) => {
+  store.commit('updateConfig', {
+    key: 'ClipboardManager',
+    value: {
+      ...proxy.value,
+      Menu: menu
+    }
+  })
+}
+
 const formatActions = (actions: string[][]): string => {
   if (!actions || !Array.isArray(actions)) return ''
   return (actions as unknown as unknown[]).map(a => {
@@ -228,8 +271,14 @@ const formatActions = (actions: string[][]): string => {
 }
 
 const oncheck = (index: number, value: boolean) => {
-  const row = proxy.value.Menu[index]
-  row.Valid = value
+  const menu = [...proxy.value.Menu]
+  const row = menu[index]
+  if (!row) return
+  menu[index] = {
+    ...row,
+    Valid: value
+  }
+  updateClipboardManager(menu)
 }
 
 const modify = (index: number) => {
@@ -257,23 +306,90 @@ const create = () => {
 const on_modify = () => {
   modal.editing = false
   const index = modal.index
+  const menu = [...proxy.value.Menu]
   if (index !== undefined) {
-    const row = proxy.value.Menu[index]
-    row.Name = modal.Name
-    row.Actions = modal.NewActions
+    const row = menu[index]
+    if (!row) return
+    menu[index] = {
+      ...row,
+      Name: modal.Name,
+      Actions: modal.NewActions
+    }
   } else {
     const new_row: MenuItem = {
       Valid: true,
       Name: modal.Name,
       Actions: modal.NewActions
     }
-    proxy.value.Menu.push(new_row)
+    menu.push(new_row)
   }
+  updateClipboardManager(menu)
 }
 
 const remove = (index: number) => {
-  proxy.value.Menu.splice(index, 1)
+  const menu = [...proxy.value.Menu]
+  menu.splice(index, 1)
+  updateClipboardManager(menu)
 }
+
+const destroySortable = () => {
+  sortable?.destroy()
+  sortable = null
+}
+
+const initSortable = async () => {
+  await nextTick()
+  destroySortable()
+
+  const tableRoot = tableRef.value?.$el
+  const tbody = tableRoot?.querySelector('.el-table__body-wrapper tbody')
+  if (!tbody) return
+
+  const applyReorder = (event: SortableEvent) => {
+    const oldIndex = event.oldDraggableIndex
+      ?? event.oldIndex
+      ?? Array.from(event.from.children).indexOf(event.item)
+    const newIndex = event.newDraggableIndex
+      ?? event.newIndex
+      ?? Array.from(event.to.children).indexOf(event.item)
+
+    if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return
+
+    const menu = [...proxy.value.Menu]
+    const movedItem = menu.splice(oldIndex, 1)[0]
+    if (!movedItem) return
+    menu.splice(newIndex, 0, movedItem)
+    updateClipboardManager(menu)
+  }
+
+  sortable = Sortable.create(tbody, {
+    animation: 180,
+    handle: '.drag-handle',
+    draggable: '.el-table__row',
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 3,
+    ghostClass: 'drag-row-ghost',
+    onUpdate: (event: SortableEvent) => {
+      applyReorder(event)
+    }
+  })
+}
+
+onMounted(() => {
+  initSortable()
+})
+
+onBeforeUnmount(() => {
+  destroySortable()
+})
+
+watch(
+  () => proxy.value.Menu.length,
+  () => {
+    initSortable()
+  }
+)
 </script>
 
 <style lang="less" scoped>
@@ -308,6 +424,24 @@ const remove = (index: number) => {
 
   }
 
+  :deep(.drag-row-ghost > td) {
+    background-color: var(--bg-secondary) !important;
+    opacity: 0.85;
+  }
+
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 

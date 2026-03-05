@@ -153,6 +153,7 @@ const store = useStore()
 const route = useRoute()
 const router = useRouter()
 const { t, locale } = useI18n()
+const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en-US'] as const
 
 // Refs
 const sideMenuRef = ref<InstanceType<typeof SideMenu> | null>(null)
@@ -233,8 +234,15 @@ watch(
 )
 
 const setLocal = (lang: string) => {
-  store.dispatch('setLocal', lang)
-  locale.value = lang
+  let normalizedLang = lang
+  if (normalizedLang === 'zh') normalizedLang = 'zh-CN'
+  if (normalizedLang === 'en') normalizedLang = 'en-US'
+  if (!SUPPORTED_LOCALES.includes(normalizedLang as typeof SUPPORTED_LOCALES[number])) {
+    normalizedLang = 'zh-CN'
+  }
+
+  store.dispatch('setLocal', normalizedLang)
+  locale.value = normalizedLang
 }
 
 const turnToPage = (routeItem: string | { name: string; params?: Record<string, unknown>; query?: Record<string, unknown> }) => {
